@@ -40,6 +40,8 @@ end
 module DataMapper
   module Adapters
     class CouchDBAdapter < AbstractAdapter
+      class DocumentError < RuntimeError; end
+
       def initialize(name, uri_or_options)
         super(name, uri_or_options)
         @resource_naming_convention = NamingConventions::Resource::Underscored
@@ -118,11 +120,18 @@ module DataMapper
         updated
       end
 
+      def check_document_error(doc)
+        if doc['error']
+          raise DocumentError, doc.inspect
+        end
+      end
+
       # Reads in a set from a query.
       def read_many(query)
         doc = request do |http|
           http.request(build_request(query))
         end
+        check_document_error(doc)
         if query.view && query.model.views[query.view.to_sym].has_key?('reduce')
           doc['rows']
         else
@@ -160,6 +169,7 @@ module DataMapper
         doc = request do |http|
           http.request(build_request(query))
         end
+        check_document_error(doc)
         if doc['rows'] && !doc['rows'].empty?
           data = doc['rows'].first['value']
         elsif !doc['rows'] &&
@@ -228,8 +238,9 @@ module DataMapper
       # @api private
       def view_request(query)
         keys = query.view_options.delete(:keys)
-        uri = "/#{self.escaped_db_name}/_view/" +
+        uri = "/#{self.escaped_db_name}/_design/" +
           "#{query.model.base_model.to_s}/" +
+          "_view/" +
           "#{query.view}" +
           "#{query_string(query)}"
         if keys
@@ -264,7 +275,7 @@ module DataMapper
           key = "[#{key}]"
         end
 
-        request = Net::HTTP::Post.new("/#{self.escaped_db_name}/_slow_view#{query_string(query)}")
+        request = Net::HTTP::Post.new("/#{self.escaped_db_name}/_temp_view#{query_string(query)}")
         request["Content-Type"] = "application/json"
 
         couchdb_type_condition = ["doc.couchdb_type == '#{query.model.to_s}'"]
