@@ -157,7 +157,7 @@ module DataMapper
           http.request(build_request(query))
         end
         check_document_error(doc)
-        if doc['rows'] || query.view && query.model.views[query.view.to_sym].has_key?('reduce')
+        if query.reduced?
           doc['rows']
         else
           collection =

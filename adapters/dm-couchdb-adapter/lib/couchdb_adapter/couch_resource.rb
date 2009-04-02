@@ -1,6 +1,10 @@
 module DataMapper
   class Query
     attr_accessor :map, :reduce, :emit
+
+    def reduced?
+      reduce || (view && model.views[view.to_sym].has_key?('reduce'))
+    end
   end
 end
 
