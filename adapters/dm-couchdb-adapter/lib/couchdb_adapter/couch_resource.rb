@@ -1,4 +1,10 @@
 module DataMapper
+  class Query
+    attr_accessor :map, :reduce, :emit
+  end
+end
+
+module DataMapper
   class Collection
     attr_accessor :total_rows
   end
@@ -42,7 +48,6 @@ module DataMapper
           end
 
         end
-
       end
     end
 

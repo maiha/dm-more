@@ -120,6 +120,31 @@ module DataMapper
         updated
       end
 
+      def count(query)
+        query.emit   = "emit(null, 1)"
+        query.reduce = "function(keys, values) { return sum(values); }"
+        docs = read_many(query)
+
+        # [{"value"=>5, "key"=>nil}]
+        if docs.blank?
+          [0]
+        else
+          docs.map{|doc| doc["value"]}
+        end
+      end
+
+      def aggregate(query)
+        # @fields=[#<DataMapper::Query::Operator:0xb74e6db4 @target=:all, @operator=:count>]
+        op = query.fields.first{ |p| p.kind_of?(DataMapper::Query::Operator) } or
+          raise NotImplementedError, "operator not found in aggregate: %s" % query.inspect
+
+        if respond_to?(op.operator, true)
+          __send__(op.operator, query)
+        else
+          raise NotImplementedError, "#{op.operator} is not supported yet"
+        end
+      end
+
       def check_document_error(doc)
         if doc['error']
           raise DocumentError, doc.inspect
@@ -132,7 +157,7 @@ module DataMapper
           http.request(build_request(query))
         end
         check_document_error(doc)
-        if query.view && query.model.views[query.view.to_sym].has_key?('reduce')
+        if doc['rows'] || query.view && query.model.views[query.view.to_sym].has_key?('reduce')
           doc['rows']
         else
           collection =
@@ -285,15 +310,11 @@ module DataMapper
         couchdb_type_conditions = couchdb_type_condition.join(' || ')
 
         if query.conditions.empty?
-          request.body =
-%Q({"map":
-  "function(doc) {
-  if (#{couchdb_type_conditions}) {
-    emit(#{key}, doc);
-    }
-  }"
-}
-)
+          emit = query.emit ? query.emit : "emit(#{key}, doc)"
+          hash = {}
+          hash["map"] = "function(doc) { if (#{couchdb_type_conditions}) { #{emit};}  }"
+          hash["reduce"] = query.reduce if query.reduce
+          request.body = hash.to_json
         else
           conditions = query.conditions.map do |operator, property, value|
             if operator == :eql && value.is_a?(Array)
@@ -315,15 +336,11 @@ module DataMapper
               end
             end
           end
-          request.body =
-%Q({"map":
-  "function(doc) {
-    if ((#{couchdb_type_conditions}) && #{conditions.join(' && ')}) {
-      emit(#{key}, doc);
-    }
-  }"
-}
-)
+          emit = query.emit ? query.emit : "emit(#{key}, doc)"
+          hash = {}
+          hash["map"] = "function(doc) { if (#{couchdb_type_conditions} && #{conditions.join(' && ')}) { #{emit};}  }"
+          hash["reduce"] = query.reduce if query.reduce
+          request.body = hash.to_json
         end
         request
       end
